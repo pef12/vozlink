@@ -1,0 +1,10 @@
+{
+  "name": "VozLink - Microfone Android para PC",
+  "description": "Transmita e transcreva áudio em tempo real do microfone do Android para o computador com verificação segura por código PIN na mesma rede.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
