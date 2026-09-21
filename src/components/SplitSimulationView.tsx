@@ -57,7 +57,7 @@ export const SplitSimulationView: React.FC<SplitSimulationViewProps> = ({
             <AndroidView
               initialPin={pin}
               onSendWsMessage={onSendWsMessage}
-              isPaired={isPaired}
+              isPaired={isPaired ?? true}
               pairedPin={pin}
               onPairSuccess={onPairSuccess}
               onDisconnect={onDisconnect}

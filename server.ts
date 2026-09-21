@@ -10,6 +10,7 @@ interface Session {
   pin: string;
   sessionId: string;
   desktopWs?: WebSocket;
+  desktopSockets?: Set<WebSocket>;
   androidWs?: WebSocket;
   createdAt: number;
   androidDeviceName?: string;
@@ -176,6 +177,183 @@ Texto ditado:
   }
 });
 
+// Helper to determine WS base URL from request
+function getWsUrlFromReq(req: express.Request): string {
+  const host = req.headers.host || `localhost:${PORT}`;
+  const proto = req.headers['x-forwarded-proto'] === 'https' ? 'wss' : 'ws';
+  return `${proto}://${host}/ws`;
+}
+
+// Windows PowerShell Companion Script (SendKeys auto-typing into foreground app)
+app.get('/api/companion/powershell', (req, res) => {
+  const pin = (req.query.pin as string) || '';
+  const wsUrl = getWsUrlFromReq(req);
+
+  const script = `# ==============================================================================
+# VozLink - Assistente de Digitação no App em Destaque (Windows PowerShell)
+# Digita automaticamente o texto recebido do celular Android no aplicativo ativo
+# (Ex: Bloco de Notas, Microsoft Word, Navegador, WhatsApp, Discord, etc.)
+# ==============================================================================
+
+param (
+    [string]$Pin = "${pin}",
+    [string]$WsUrl = "${wsUrl}"
+)
+
+Add-Type -AssemblyName System.Windows.Forms
+
+Clear-Host
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "       VOZLINK - DIGITAÇÃO NO APP EM DESTAQUE (PC)        " -ForegroundColor Yellow
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "Servidor : $WsUrl" -ForegroundColor Gray
+Write-Host "PIN      : $Pin" -ForegroundColor Magenta
+Write-Host ""
+Write-Host "Conectando ao VozLink..." -ForegroundColor Gray
+
+try {
+    $ws = New-Object System.Net.WebSockets.ClientWebSocket
+    $cts = New-Object System.Threading.CancellationTokenSource
+    $uri = New-Object System.Uri($WsUrl)
+    $ws.ConnectAsync($uri, $cts.Token).Wait()
+
+    # Registra no servidor como ouvinte do computador
+    $regPayload = @{ type = "register_desktop"; pin = $Pin } | ConvertTo-Json -Compress
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($regPayload)
+    $seg = New-Object System.ArraySegment[byte] -ArgumentList @(,$bytes)
+    $ws.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $cts.Token).Wait()
+
+    Write-Host ""
+    Write-Host "[OK] CONECTADO COM SUCESSO AO VOZLINK!" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host "-> CLIQUE NO APLICATIVO EM QUE VOCÊ DESEJA DIGITAR" -ForegroundColor Yellow
+    Write-Host "   (Ex: Abra o Bloco de Notas, Word, WhatsApp Web ou qualquer app)" -ForegroundColor White
+    Write-Host "-> Fale no microfone do seu celular Android." -ForegroundColor Cyan
+    Write-Host "-> O texto sera digitado automaticamente no cursor ativo!" -ForegroundColor Green
+    Write-Host "-> Para fechar a qualquer momento, pressione Ctrl + C." -ForegroundColor Gray
+    Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
+
+    $buffer = New-Object byte[] 8192
+    while ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        $segRecv = New-Object System.ArraySegment[byte] -ArgumentList @(,$buffer)
+        $res = $ws.ReceiveAsync($segRecv, $cts.Token).Result
+        if ($res.Count -gt 0) {
+            $msg = [System.Text.Encoding]::UTF8.GetString($buffer, 0, $res.Count)
+            try {
+                $data = $msg | ConvertFrom-Json
+                if ($data.type -eq "speech_final" -and $data.text) {
+                    $spoken = $data.text.Trim()
+                    Write-Host "[Inserindo]: $spoken" -ForegroundColor Green
+                    # Tratar caracteres de escape do SendKeys do Windows ({, }, +, ^, %, ~, (, ))
+                    $escaped = $spoken -replace '([\{\}\+\^\%~\(\)\[\]])', '{$1}'
+                    [System.Windows.Forms.SendKeys]::SendWait($escaped + " ")
+                }
+            } catch {}
+        }
+    }
+} catch {
+    Write-Host "Erro de conexao: $_" -ForegroundColor Red
+    Write-Host "Pressione qualquer tecla para sair..."
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}
+`;
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="vozlink-digitar-pc.ps1"');
+  res.send(script);
+});
+
+// Python Companion Script (pyautogui auto-typing)
+app.get('/api/companion/python', (req, res) => {
+  const pin = (req.query.pin as string) || '';
+  const wsUrl = getWsUrlFromReq(req);
+
+  const script = `# ==============================================================================
+# VozLink - Assistente de Digitação no App em Destaque (Python)
+# Digita automaticamente o texto recebido do celular Android no app em primeiro plano
+# ==============================================================================
+import json
+import sys
+import time
+
+try:
+    import websocket
+    import pyautogui
+except ImportError:
+    print("Instalando dependencias necessarias (pyautogui, websocket-client)...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyautogui", "websocket-client"])
+    import websocket
+    import pyautogui
+
+PIN = "${pin}"
+WS_URL = "${wsUrl}"
+
+print("=" * 60)
+print("     VOZLINK - DIGITAÇÃO NO APLICATIVO EM DESTAQUE (PC)")
+print("=" * 60)
+print(f"PIN configurado: {PIN}")
+print(f"Conectando a   : {WS_URL}")
+print("-> Clique no aplicativo ou campo onde deseja inserir o texto!")
+print("-> Pressione Ctrl + C para encerrar.")
+print("-" * 60)
+
+def on_message(ws, message):
+    try:
+        data = json.loads(message)
+        if data.get("type") == "speech_final":
+            text = data.get("text", "").strip()
+            if text:
+                print(f"[Inserindo no app ativo]: {text}")
+                pyautogui.write(text + " ", interval=0.01)
+    except Exception as e:
+        print(f"Erro: {e}")
+
+def on_open(ws):
+    print("[Conectado com sucesso! Registrando sessao...]")
+    ws.send(json.dumps({"type": "register_desktop", "pin": PIN}))
+    print("Pronto! Fale no microfone do celular Android.")
+
+def on_error(ws, error):
+    print(f"Erro de comunicacao: {error}")
+
+def on_close(ws, close_status_code, close_msg):
+    print("Conexao encerrada. Reconectando em 3s...")
+    time.sleep(3)
+    start()
+
+def start():
+    ws = websocket.WebSocketApp(
+        WS_URL,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close
+    )
+    ws.run_forever()
+
+if __name__ == "__main__":
+    start()
+`;
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="vozlink-digitar-pc.py"');
+  res.send(script);
+});
+
+// Helper to broadcast to all desktop connections of a session
+function broadcastToDesktop(sess: Session, payload: string) {
+  if (sess.desktopSockets && sess.desktopSockets.size > 0) {
+    for (const ws of sess.desktopSockets) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+      }
+    }
+  } else if (sess.desktopWs && sess.desktopWs.readyState === WebSocket.OPEN) {
+    sess.desktopWs.send(payload);
+  }
+}
+
 // ---------------- WEBSOCKET REALTIME SERVER ----------------
 
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -198,11 +376,14 @@ wss.on('connection', (ws: WebSocket) => {
               pin,
               sessionId,
               desktopWs: ws,
+              desktopSockets: new Set([ws]),
               createdAt: Date.now(),
             });
           } else {
             const sess = sessions.get(pin)!;
             sess.desktopWs = ws;
+            if (!sess.desktopSockets) sess.desktopSockets = new Set();
+            sess.desktopSockets.add(ws);
           }
 
           currentPin = pin;
@@ -251,16 +432,15 @@ wss.on('connection', (ws: WebSocket) => {
           );
 
           // Notify Desktop that Android joined
-          if (session.desktopWs && session.desktopWs.readyState === WebSocket.OPEN) {
-            session.desktopWs.send(
-              JSON.stringify({
-                type: 'paired',
-                pin,
-                deviceName,
-                role: 'desktop',
-              })
-            );
-          }
+          broadcastToDesktop(
+            session,
+            JSON.stringify({
+              type: 'paired',
+              pin,
+              deviceName,
+              role: 'desktop',
+            })
+          );
           break;
         }
 
@@ -268,8 +448,9 @@ wss.on('connection', (ws: WebSocket) => {
           // Android speaking -> relay live text to Desktop
           if (currentPin) {
             const sess = sessions.get(currentPin);
-            if (sess?.desktopWs && sess.desktopWs.readyState === WebSocket.OPEN) {
-              sess.desktopWs.send(
+            if (sess) {
+              broadcastToDesktop(
+                sess,
                 JSON.stringify({
                   type: 'speech_interim',
                   text: message.text || '',
@@ -285,8 +466,9 @@ wss.on('connection', (ws: WebSocket) => {
           // Android finalized sentence -> relay to Desktop
           if (currentPin) {
             const sess = sessions.get(currentPin);
-            if (sess?.desktopWs && sess.desktopWs.readyState === WebSocket.OPEN) {
-              sess.desktopWs.send(
+            if (sess) {
+              broadcastToDesktop(
+                sess,
                 JSON.stringify({
                   type: 'speech_final',
                   id: message.id || Math.random().toString(36).substring(2, 9),
@@ -303,8 +485,9 @@ wss.on('connection', (ws: WebSocket) => {
           // Live microphone amplitude meter
           if (currentPin) {
             const sess = sessions.get(currentPin);
-            if (sess?.desktopWs && sess.desktopWs.readyState === WebSocket.OPEN) {
-              sess.desktopWs.send(
+            if (sess) {
+              broadcastToDesktop(
+                sess,
                 JSON.stringify({
                   type: 'audio_level',
                   level: message.level || 0,
@@ -319,9 +502,18 @@ wss.on('connection', (ws: WebSocket) => {
           // Desktop sends command (e.g. clear, pause, toggle_mic) -> relay to Android or vice-versa
           if (currentPin) {
             const sess = sessions.get(currentPin);
-            const target = role === 'desktop' ? sess?.androidWs : sess?.desktopWs;
-            if (target && target.readyState === WebSocket.OPEN) {
-              target.send(
+            if (role === 'desktop') {
+              if (sess?.androidWs && sess.androidWs.readyState === WebSocket.OPEN) {
+                sess.androidWs.send(
+                  JSON.stringify({
+                    type: 'remote_command',
+                    command: message.command,
+                  })
+                );
+              }
+            } else if (sess) {
+              broadcastToDesktop(
+                sess,
                 JSON.stringify({
                   type: 'remote_command',
                   command: message.command,
@@ -347,16 +539,18 @@ wss.on('connection', (ws: WebSocket) => {
       const sess = sessions.get(currentPin)!;
       if (role === 'android') {
         sess.androidWs = undefined;
-        if (sess.desktopWs && sess.desktopWs.readyState === WebSocket.OPEN) {
-          sess.desktopWs.send(
-            JSON.stringify({
-              type: 'peer_disconnected',
-              peer: 'android',
-            })
-          );
-        }
+        broadcastToDesktop(
+          sess,
+          JSON.stringify({
+            type: 'peer_disconnected',
+            peer: 'android',
+          })
+        );
       } else if (role === 'desktop') {
-        sess.desktopWs = undefined;
+        sess.desktopSockets?.delete(ws);
+        if (sess.desktopSockets?.size === 0) {
+          sess.desktopWs = undefined;
+        }
         if (sess.androidWs && sess.androidWs.readyState === WebSocket.OPEN) {
           sess.androidWs.send(
             JSON.stringify({

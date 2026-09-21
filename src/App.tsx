@@ -38,7 +38,7 @@ export default function App() {
   const [transcriptions, setTranscriptions] = useState<TranscriptionRecord[]>([]);
   const [interimText, setInterimText] = useState<string>('');
   const [audioLevel, setAudioLevel] = useState<number>(0);
-  const [androidPairSuccess, setAndroidPairSuccess] = useState(false);
+  const [androidPairSuccess, setAndroidPairSuccess] = useState(true);
   const [socketError, setSocketError] = useState<string>('');
 
   const socketRef = useRef<VozLinkSocket | null>(null);
@@ -158,6 +158,14 @@ export default function App() {
         type: 'register_desktop',
         pin,
       });
+      if (currentMode === 'split') {
+        socketRef.current.send({
+          type: 'register_android',
+          pin,
+          deviceName: 'Android (Simulador)',
+        });
+        setIsAndroidConnected(true);
+      }
     }
 
     if (currentMode === 'android' && urlPin) {
@@ -235,6 +243,7 @@ export default function App() {
         onSelectMode={(mode) => setCurrentMode(mode)}
         connectionStatus={connectionStatus}
         isAndroidConnected={isAndroidConnected}
+        audioLevel={audioLevel}
       />
 
       {/* Main View Body */}

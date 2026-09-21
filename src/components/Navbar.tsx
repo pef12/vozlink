@@ -16,6 +16,7 @@ interface NavbarProps {
   onSelectMode: (mode: DeviceMode) => void;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
   isAndroidConnected: boolean;
+  audioLevel?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -23,8 +24,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectMode,
   connectionStatus,
   isAndroidConnected,
+  audioLevel = 0,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
+  const isVoiceActive = isAndroidConnected && audioLevel > 0.05;
 
   return (
     <>
@@ -94,8 +97,76 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
-          {/* Right Help button & Status */}
+          {/* Right Help button & Connection Status with gentle pulse effect */}
           <div className="flex items-center gap-2">
+            {/* Connection badge with active voice pulse */}
+            <div
+              id="nav-connection-indicator"
+              className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all duration-300 ${
+                isAndroidConnected
+                  ? isVoiceActive
+                    ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
+                    : 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400'
+                  : connectionStatus === 'connected'
+                  ? 'bg-slate-950 border-slate-800 text-slate-400'
+                  : 'bg-rose-950/40 border-rose-800/40 text-rose-400'
+              }`}
+              title={
+                isAndroidConnected
+                  ? isVoiceActive
+                    ? 'Celular transmitindo áudio em tempo real'
+                    : 'Celular pareado e conectado'
+                  : connectionStatus === 'connected'
+                  ? 'Aguardando celular conectar pelo PIN'
+                  : 'Desconectado'
+              }
+            >
+              {/* Soft pulsating glow rings when voice is active */}
+              {isVoiceActive && (
+                <span className="absolute -inset-0.5 rounded-full bg-emerald-500/25 animate-ping duration-1000 pointer-events-none" />
+              )}
+
+              {/* Status Icon */}
+              <div className="relative flex items-center justify-center">
+                <Wifi
+                  className={`w-3.5 h-3.5 transition-all duration-200 ${
+                    isVoiceActive
+                      ? 'text-emerald-300 scale-110'
+                      : isAndroidConnected
+                      ? 'text-emerald-400'
+                      : 'text-slate-500'
+                  }`}
+                />
+                {isAndroidConnected && (
+                  <span
+                    className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${
+                      isVoiceActive
+                        ? 'bg-emerald-300 animate-pulse shadow-[0_0_6px_#6ee7b7]'
+                        : 'bg-emerald-400'
+                    }`}
+                  />
+                )}
+              </div>
+
+              {/* Text label */}
+              <span className="hidden sm:inline text-[11px] font-medium">
+                {isAndroidConnected
+                  ? isVoiceActive
+                    ? 'Captando voz'
+                    : 'Celular pareado'
+                  : 'Aguardando PIN'}
+              </span>
+
+              {/* Audio meter mini bar if active voice */}
+              {isVoiceActive && (
+                <div className="flex items-center gap-0.5 h-3 pl-1">
+                  <span className="w-0.5 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                  <span className="w-0.5 h-3 bg-emerald-300 rounded-full animate-pulse delay-75" />
+                  <span className="w-0.5 h-1.5 bg-emerald-400 rounded-full animate-pulse delay-150" />
+                </div>
+              )}
+            </div>
+
             <button
               id="help-guide-btn"
               onClick={() => setShowHelp(true)}

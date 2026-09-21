@@ -15,9 +15,15 @@ import {
   Clock,
   Settings,
   ExternalLink,
+  Keyboard,
+  Terminal,
+  ListFilter,
+  Monitor,
 } from 'lucide-react';
 import { TranscriptionRecord } from '../types';
 import { QrCodeModal } from './QrCodeModal';
+import { ActiveInputField } from './ActiveInputField';
+import { GlobalTyperModal } from './GlobalTyperModal';
 
 interface DesktopViewProps {
   pin: string;
@@ -44,12 +50,18 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
   localIps = [],
 }) => {
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showGlobalTyperModal, setShowGlobalTyperModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'active_field' | 'history'>('active_field');
   const [copiedPin, setCopiedPin] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [enhancedFullText, setEnhancedFullText] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg' | 'xl'>('base');
   const [autoScroll, setAutoScroll] = useState(true);
+
+  // Latest final transcript to pass to active input field
+  const latestFinalRecord = transcriptions.length > 0 ? transcriptions[transcriptions.length - 1] : null;
+  const latestFinalText = latestFinalRecord ? latestFinalRecord.text : '';
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -245,200 +257,270 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
         </div>
       </div>
 
-      {/* Main Transcription Area */}
-      <div
-        id="desktop-transcription-card"
-        className="flex-1 flex flex-col bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden min-h-[420px]"
-      >
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-300">
-          {/* Left stats */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 font-medium text-slate-300">
-              <FileText className="w-4 h-4 text-indigo-400" />
-              <span>{wordCount} palavras</span>
-              <span className="text-slate-600">•</span>
-              <span>{charCount} caracteres</span>
+      {/* Navigation Tabs: In-Focus Active Input vs Structured History */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 shadow-md">
+          <button
+            id="tab-active-field-btn"
+            onClick={() => setActiveTab('active_field')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === 'active_field'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Keyboard className="w-4 h-4" />
+            <span>Campo de Texto em Destaque</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/20">
+              Inserção Direta
+            </span>
+          </button>
+
+          <button
+            id="tab-history-btn"
+            onClick={() => setActiveTab('history')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === 'history'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>Histórico de Transcrições</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300">
+              {transcriptions.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Global Desktop Typer Helper Button */}
+        <button
+          id="open-global-typer-header-btn"
+          onClick={() => setShowGlobalTyperModal(true)}
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-medium transition-colors shadow-sm"
+          title="Configurar digitação automática em programas externos (Word, Bloco de Notas, etc.)"
+        >
+          <Terminal className="w-4 h-4 text-indigo-400" />
+          <span>Digitar em Apps Externos (Word, Bloco de Notas)</span>
+        </button>
+      </div>
+
+      {/* View Content: Active In-Focus Field or Structured History */}
+      {activeTab === 'active_field' ? (
+        <div className="flex-1 min-h-[420px]">
+          <ActiveInputField
+            incomingFinalText={latestFinalText}
+            incomingInterimText={interimText}
+            isAndroidConnected={isAndroidConnected}
+            onEnhanceWithAi={onEnhanceWithAi}
+            onOpenGlobalTyperModal={() => setShowGlobalTyperModal(true)}
+            pin={pin}
+          />
+        </div>
+      ) : (
+        /* Main Transcription History Card */
+        <div
+          id="desktop-transcription-card"
+          className="flex-1 flex flex-col bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden min-h-[420px]"
+        >
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-slate-900/90 border-b border-slate-800 text-xs text-slate-300">
+            {/* Left stats */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1.5 font-medium text-slate-300">
+                <FileText className="w-4 h-4 text-indigo-400" />
+                <span>{wordCount} palavras</span>
+                <span className="text-slate-600">•</span>
+                <span>{charCount} caracteres</span>
+              </div>
+
+              {interimText && (
+                <div className="flex items-center gap-1 text-indigo-400 animate-pulse font-medium">
+                  <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                  <span>Ouvindo celular...</span>
+                </div>
+              )}
             </div>
 
-            {interimText && (
-              <div className="flex items-center gap-1 text-indigo-400 animate-pulse font-medium">
-                <span className="w-2 h-2 rounded-full bg-indigo-400" />
-                <span>Ouvindo celular...</span>
+            {/* Right controls */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Font size picker */}
+              <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 mr-1">
+                {(['sm', 'base', 'lg'] as const).map((size) => (
+                  <button
+                    key={size}
+                    id={`font-size-${size}-btn`}
+                    onClick={() => setFontSize(size)}
+                    className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                      fontSize === size
+                        ? 'bg-slate-800 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {size.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+
+              {/* AI Refinement */}
+              <button
+                id="ai-enhance-btn"
+                onClick={handleEnhance}
+                disabled={isEnhancing || !displayText.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-all shadow-sm"
+                title="Corrigir pontuação e estruturar texto com IA"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${isEnhancing ? 'animate-spin' : ''}`} />
+                <span>{isEnhancing ? 'Aprimorando...' : 'Pontuar com IA'}</span>
+              </button>
+
+              {/* Copy button */}
+              <button
+                id="copy-transcript-btn"
+                onClick={handleCopyAllText}
+                disabled={!displayText.trim() && !interimText.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-100 rounded-lg font-medium transition-colors"
+              >
+                {copiedText ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copiar</span>
+                  </>
+                )}
+              </button>
+
+              {/* Export menu */}
+              <button
+                id="download-txt-btn"
+                onClick={() => handleDownload('txt')}
+                disabled={!displayText.trim()}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white rounded-lg transition-colors"
+                title="Baixar em formato .txt"
+                aria-label="Baixar texto"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+
+              {/* Clear button */}
+              <button
+                id="clear-transcript-btn"
+                onClick={() => {
+                  onClearTranscriptions();
+                  setEnhancedFullText(null);
+                }}
+                disabled={!displayText.trim() && !interimText.trim()}
+                className="p-1.5 bg-slate-800 hover:bg-rose-900/50 hover:text-rose-300 disabled:opacity-40 text-slate-400 rounded-lg transition-colors"
+                title="Limpar transcrição"
+                aria-label="Limpar texto"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Scrollable Transcript Body */}
+          <div
+            ref={scrollContainerRef}
+            id="transcription-stream-body"
+            className="flex-1 p-5 md:p-6 overflow-y-auto space-y-4 bg-slate-950/40"
+          >
+            {transcriptions.length === 0 && !interimText ? (
+              <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4 shadow-inner">
+                  <Mic className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-200 mb-1">
+                  Pronto para receber sua voz
+                </h3>
+                <p className="text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
+                  Abra o VozLink no seu celular Android, conecte com o PIN{' '}
+                  <strong className="text-indigo-300 font-mono">{pin}</strong> e comece a falar. As
+                  palavras aparecerão aqui em tempo real.
+                </p>
+                <button
+                  id="empty-state-qr-btn"
+                  onClick={() => setShowQrModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition-colors"
+                >
+                  <QrCode className="w-4 h-4 text-indigo-400" />
+                  <span>Ver QR Code para Conectar</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Formatted Paragraphs / Log */}
+                {enhancedFullText !== null ? (
+                  <div className="p-4 bg-indigo-950/20 border border-indigo-500/30 rounded-xl">
+                    <div className="flex items-center justify-between text-xs text-indigo-300 mb-2 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Texto Pontuado e Formatado por IA
+                      </span>
+                      <button
+                        onClick={() => setEnhancedFullText(null)}
+                        className="text-[11px] underline hover:text-white"
+                      >
+                        Ver Original
+                      </button>
+                    </div>
+                    <p className={`text-slate-100 whitespace-pre-wrap ${fontClasses[fontSize]}`}>
+                      {enhancedFullText}
+                    </p>
+                  </div>
+                ) : (
+                  transcriptions.map((item) => (
+                    <div
+                      key={item.id}
+                      className="group relative p-3.5 bg-slate-900/70 hover:bg-slate-900 border border-slate-800 rounded-xl transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className={`text-slate-100 font-normal ${fontClasses[fontSize]}`}>
+                          {item.text}
+                        </p>
+                        <span className="text-[10px] text-slate-500 font-mono shrink-0 flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                          <Clock className="w-3 h-3" />
+                          {new Date(item.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                {/* Live Interim Streaming Bubble */}
+                {interimText && (
+                  <div
+                    id="interim-text-bubble"
+                    className="p-3.5 bg-indigo-950/40 border border-indigo-500/40 rounded-xl text-indigo-200 animate-pulse"
+                  >
+                    <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400 mb-1">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+                      <span>Ditando agora pelo Android:</span>
+                    </div>
+                    <p className={`font-normal ${fontClasses[fontSize]}`}>{interimText}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
-
-          {/* Right controls */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* Font size picker */}
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5 mr-1">
-              {(['sm', 'base', 'lg'] as const).map((size) => (
-                <button
-                  key={size}
-                  id={`font-size-${size}-btn`}
-                  onClick={() => setFontSize(size)}
-                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
-                    fontSize === size
-                      ? 'bg-slate-800 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {size.toUpperCase()}
-                </button>
-              ))}
-            </div>
-
-            {/* AI Refinement */}
-            <button
-              id="ai-enhance-btn"
-              onClick={handleEnhance}
-              disabled={isEnhancing || !displayText.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-all shadow-sm"
-              title="Corrigir pontuação e estruturar texto com IA"
-            >
-              <Sparkles className={`w-3.5 h-3.5 ${isEnhancing ? 'animate-spin' : ''}`} />
-              <span>{isEnhancing ? 'Aprimorando...' : 'Pontuar com IA'}</span>
-            </button>
-
-            {/* Copy button */}
-            <button
-              id="copy-transcript-btn"
-              onClick={handleCopyAllText}
-              disabled={!displayText.trim() && !interimText.trim()}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-100 rounded-lg font-medium transition-colors"
-            >
-              {copiedText ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Copiado!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copiar</span>
-                </>
-              )}
-            </button>
-
-            {/* Export menu */}
-            <button
-              id="download-txt-btn"
-              onClick={() => handleDownload('txt')}
-              disabled={!displayText.trim()}
-              className="p-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 hover:text-white rounded-lg transition-colors"
-              title="Baixar em formato .txt"
-              aria-label="Baixar texto"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-
-            {/* Clear button */}
-            <button
-              id="clear-transcript-btn"
-              onClick={() => {
-                onClearTranscriptions();
-                setEnhancedFullText(null);
-              }}
-              disabled={!displayText.trim() && !interimText.trim()}
-              className="p-1.5 bg-slate-800 hover:bg-rose-900/50 hover:text-rose-300 disabled:opacity-40 text-slate-400 rounded-lg transition-colors"
-              title="Limpar transcrição"
-              aria-label="Limpar texto"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
         </div>
+      )}
 
-        {/* Scrollable Transcript Body */}
-        <div
-          ref={scrollContainerRef}
-          id="transcription-stream-body"
-          className="flex-1 p-5 md:p-6 overflow-y-auto space-y-4 bg-slate-950/40"
-        >
-          {transcriptions.length === 0 && !interimText ? (
-            <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-center p-6 text-slate-400">
-              <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4 shadow-inner">
-                <Mic className="w-8 h-8" />
-              </div>
-              <h3 className="text-lg font-semibold text-slate-200 mb-1">
-                Pronto para receber sua voz
-              </h3>
-              <p className="text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
-                Abra o VozLink no seu celular Android, conecte com o PIN{' '}
-                <strong className="text-indigo-300 font-mono">{pin}</strong> e comece a falar. As
-                palavras aparecerão aqui em tempo real.
-              </p>
-              <button
-                id="empty-state-qr-btn"
-                onClick={() => setShowQrModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium border border-slate-700 transition-colors"
-              >
-                <QrCode className="w-4 h-4 text-indigo-400" />
-                <span>Ver QR Code para Conectar</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {/* Formatted Paragraphs / Log */}
-              {enhancedFullText !== null ? (
-                <div className="p-4 bg-indigo-950/20 border border-indigo-500/30 rounded-xl">
-                  <div className="flex items-center justify-between text-xs text-indigo-300 mb-2 font-medium">
-                    <span className="flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Texto Pontuado e Formatado por IA
-                    </span>
-                    <button
-                      onClick={() => setEnhancedFullText(null)}
-                      className="text-[11px] underline hover:text-white"
-                    >
-                      Ver Original
-                    </button>
-                  </div>
-                  <p className={`text-slate-100 whitespace-pre-wrap ${fontClasses[fontSize]}`}>
-                    {enhancedFullText}
-                  </p>
-                </div>
-              ) : (
-                transcriptions.map((item) => (
-                  <div
-                    key={item.id}
-                    className="group relative p-3.5 bg-slate-900/70 hover:bg-slate-900 border border-slate-800 rounded-xl transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className={`text-slate-100 font-normal ${fontClasses[fontSize]}`}>
-                        {item.text}
-                      </p>
-                      <span className="text-[10px] text-slate-500 font-mono shrink-0 flex items-center gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
-                        <Clock className="w-3 h-3" />
-                        {new Date(item.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-
-              {/* Live Interim Streaming Bubble */}
-              {interimText && (
-                <div
-                  id="interim-text-bubble"
-                  className="p-3.5 bg-indigo-950/40 border border-indigo-500/40 rounded-xl text-indigo-200 animate-pulse"
-                >
-                  <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400 mb-1">
-                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
-                    <span>Ditando agora pelo Android:</span>
-                  </div>
-                  <p className={`font-normal ${fontClasses[fontSize]}`}>{interimText}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Global PC Typer Modal */}
+      <GlobalTyperModal
+        isOpen={showGlobalTyperModal}
+        onClose={() => setShowGlobalTyperModal(false)}
+        pin={pin}
+        localIps={localIps}
+      />
 
       {/* QR Code Modal */}
       <QrCodeModal

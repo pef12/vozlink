@@ -47,13 +47,8 @@ export class SpeechStreamer {
     const win = window as any;
     const SpeechRecognitionClass = win.SpeechRecognition || win.webkitSpeechRecognition;
 
-    if (!SpeechRecognitionClass) {
-      this.onError?.('Reconhecimento de voz não suportado neste navegador. Use o Chrome ou Edge no Android.');
-      return false;
-    }
-
-    try {
-      // 1. Initialize microphone stream for audio level metering
+    // 1. Try to initialize microphone stream for real sound meter
+    if (navigator?.mediaDevices?.getUserMedia) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -67,71 +62,79 @@ export class SpeechStreamer {
       } catch (err) {
         console.warn('Microphone audioContext could not be initialized for meter:', err);
       }
+    }
 
-      // 2. Initialize SpeechRecognition
-      this.recognition = new SpeechRecognitionClass();
-      this.recognition.continuous = true;
-      this.recognition.interimResults = true;
-      this.recognition.lang = this.language;
-      this.recognition.maxAlternatives = 1;
+    // 2. If SpeechRecognition is supported, initialize it
+    if (SpeechRecognitionClass) {
+      try {
+        this.recognition = new SpeechRecognitionClass();
+        this.recognition.continuous = true;
+        this.recognition.interimResults = true;
+        this.recognition.lang = this.language;
+        this.recognition.maxAlternatives = 1;
 
-      this.shouldRestart = true;
-      this.isRecording = true;
-      this.onStateChange?.(true);
+        this.shouldRestart = true;
+        this.isRecording = true;
+        this.onStateChange?.(true);
 
-      this.recognition.onresult = (event: any) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
+        this.recognition.onresult = (event: any) => {
+          let interimTranscript = '';
+          let finalTranscript = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const transcript = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += transcript;
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          if (interimTranscript.trim() && this.onInterimText) {
+            this.onInterimText(interimTranscript);
+          }
+
+          if (finalTranscript.trim() && this.onFinalText) {
+            this.onFinalText(finalTranscript);
+          }
+        };
+
+        this.recognition.onerror = (event: any) => {
+          console.warn('SpeechRecognition error:', event.error);
+          if (event.error === 'not-allowed') {
+            this.shouldRestart = false;
+            this.onError?.('Permissão de microfone negada. Permita o acesso ao microfone no navegador.');
+            this.stop();
+          } else if (event.error === 'network') {
+            this.onError?.('Aviso: Conexão com o serviço de voz do navegador instável.');
+          } else if (event.error === 'no-speech') {
+            // Ignorable silent event
+          }
+        };
+
+        this.recognition.onend = () => {
+          if (this.shouldRestart && this.isRecording) {
+            try {
+              this.recognition?.start();
+            } catch (e) {
+              // Already started or restarting
+            }
           } else {
-            interimTranscript += transcript;
+            this.isRecording = false;
+            this.onStateChange?.(false);
           }
-        }
+        };
 
-        if (interimTranscript.trim() && this.onInterimText) {
-          this.onInterimText(interimTranscript);
-        }
-
-        if (finalTranscript.trim() && this.onFinalText) {
-          this.onFinalText(finalTranscript);
-        }
-      };
-
-      this.recognition.onerror = (event: any) => {
-        console.warn('SpeechRecognition error:', event.error);
-        if (event.error === 'not-allowed') {
-          this.shouldRestart = false;
-          this.onError?.('Permissão de microfone negada. Permita o acesso ao microfone nas configurações do navegador.');
-          this.stop();
-        } else if (event.error === 'network') {
-          this.onError?.('Erro de conexão no serviço de voz.');
-        }
-      };
-
-      this.recognition.onend = () => {
-        // SpeechRecognition frequently auto-ends on mobile when silent. Restart if still recording.
-        if (this.shouldRestart && this.isRecording) {
-          try {
-            this.recognition?.start();
-          } catch (e) {
-            // Already started or restarting
-          }
-        } else {
-          this.isRecording = false;
-          this.onStateChange?.(false);
-        }
-      };
-
-      this.recognition.start();
-      return true;
-    } catch (err: any) {
-      console.error('Failed to start speech recognition:', err);
-      this.onError?.(err.message || 'Falha ao iniciar microfone.');
-      this.stop();
+        this.recognition.start();
+        return true;
+      } catch (err: any) {
+        console.warn('SpeechRecognition start failed:', err);
+        this.onError?.('Falha ao iniciar o microfone ou serviço de voz: ' + (err?.message || 'Erro desconhecido. Verifique permissões.'));
+        this.stop();
+        return false;
+      }
+    } else {
+      this.onError?.('Reconhecimento de fala nativo não suportado neste navegador. Use o Google Chrome ou Microsoft Edge no Android para transcrever sua voz real.');
       return false;
     }
   }
@@ -140,9 +143,13 @@ export class SpeechStreamer {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioCtx();
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
       const source = this.audioContext.createMediaStreamSource(stream);
       this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = 64;
+      this.analyser.fftSize = 128;
+      this.analyser.smoothingTimeConstant = 0.4;
       source.connect(this.analyser);
 
       const bufferLength = this.analyser.frequencyBinCount;
@@ -154,16 +161,20 @@ export class SpeechStreamer {
         if (!this.analyser || !this.isRecording) return;
 
         this.analyser.getByteFrequencyData(dataArray);
+        let max = 0;
         let sum = 0;
         for (let i = 0; i < bufferLength; i++) {
           sum += dataArray[i];
+          if (dataArray[i] > max) max = dataArray[i];
         }
         const avg = sum / bufferLength;
-        const normalized = Math.min(1, Math.round((avg / 128) * 100) / 100);
+        // Dynamic scaling: blend average and peak for responsive VU meter
+        const blended = (avg * 0.65 + max * 0.35) / 140;
+        const normalized = Math.min(1, Math.max(0, Math.round(blended * 100) / 100));
 
         const now = Date.now();
-        // Throttle meter updates to ~15 fps (60ms) to avoid socket flood
-        if (now - lastSent > 60) {
+        // Throttle meter updates to ~20 fps (50ms)
+        if (now - lastSent > 50) {
           this.onAudioLevel?.(normalized);
           lastSent = now;
         }
